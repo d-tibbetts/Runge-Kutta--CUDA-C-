@@ -1,0 +1,564 @@
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+#include <device_functions.h>
+#include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+#define PI  3.1415926535897932
+#define MAXEQNS    10       // maximum number of differential equations in the system
+ 
+const int itermax10 = 2;    // number of iterations to use for rk10
+const int itermax12 = 1;    // number of additional iterations to use for rk12
+const int neqns = 2;        // number of differential equations in the system
+const double tol = 1.0e-10; // the error tolerance
+const double tol10 = tol / 10;
+const bool sho = true;      // set sho to true if you want the simple harmonic oscillator results
+// set sho to false, if you want the predator - prey results
+ 
+// the following constants are the 10th order method's coefficients
+const double  a0 = 0;
+__constant__ double  a1 = 0.11747233803526765;
+__constant__ double  a2 = 0.35738424175967745;
+__constant__ double  a3 = 0.64261575824032255;
+__constant__ double  a4 = 0.88252766196473235;
+const double  a5 = 1.0000000000000000;
+ 
+__constant__ double  b10 = 0.047323231137709573;
+__constant__ double  b11 = 0.077952072407795078;
+__constant__ double  b12 = -0.010133421269900587;
+__constant__ double  b13 = 0.0028864915990617097;
+__constant__ double  b14 = -0.00055603583939812082;
+__constant__ double  b20 = 0.021779075831486075;
+__constant__ double  b21 = 0.22367959757928498;
+__constant__ double  b22 = 0.12204792759220492;
+__constant__ double  b23 = -0.012091266674498959;
+__constant__ double  b24 = 0.0019689074312004371;
+__constant__ double  b30 = 0.044887590835180592;
+__constant__ double  b31 = 0.15973856856089786;
+__constant__ double  b32 = 0.32285378852557547;
+__constant__ double  b33 = 0.12204792759220492;
+__constant__ double  b34 = -0.0069121172735362915;
+__constant__ double  b40 = 0.019343435528957094;
+__constant__ double  b41 = 0.22312684732165494;
+__constant__ double  b42 = 0.23418268877986459;
+__constant__ double  b43 = 0.32792261792646064;
+__constant__ double  b44 = 0.077952072407795078;
+const double  b50 = 0.066666666666666667;
+const double  b51 = 0.10981508874708385;
+const double  b52 = 0.37359383699761912;
+const double  b53 = 0.18126454003786724;
+const double  b54 = 0.26865986755076313;
+ 
+const double  c0 = 0.033333333333333333;
+const double  c1 = 0.18923747814892349;
+const double  c2 = 0.27742918851774318;
+const double  c3 = 0.27742918851774318;
+const double  c4 = 0.18923747814892349;
+const double  c5 = 0.033333333333333333;
+ 
+// the following coefficients allow us to get rk12 internal xk values from rk10 fk values
+__constant__ double  g10 = 0.043407276098971173;
+__constant__ double  g11 = 0.049891561330903419;
+__constant__ double  g12 = -0.012483721919363355;
+__constant__ double  g13 = 0.0064848904066894701;
+__constant__ double  g14 = -0.0038158693974615597;
+__constant__ double  g15 = 0.0014039153409773882;
+__constant__ double  g20 = 0.030385164419638569;
+__constant__ double  g21 = 0.19605322645426044;
+__constant__ double  g22 = 0.047860687574395354;
+__constant__ double  g23 = -0.012887249003100515;
+__constant__ double  g24 = 0.0064058521980400821;
+__constant__ double  g25 = -0.0022420783785910372;
+__constant__ double  g30 = 0.032291666666666667;
+__constant__ double  g31 = 0.19311806292811784;
+__constant__ double  g32 = 0.25797759963091718;
+__constant__ double  g33 = 0.019451588886825999;
+__constant__ double  g34 = -0.0038805847791943522;
+__constant__ double  g35 = 0.0010416666666666667;
+__constant__ double  g40 = 0.035575411711924371;
+__constant__ double  g41 = 0.18283162595088341;
+__constant__ double  g42 = 0.29031643752084369;
+__constant__ double  g43 = 0.22956850094334782;
+__constant__ double  g44 = -0.0068157483053369507;
+__constant__ double  g45 = 0.0029481689136947641;
+__constant__ double  g50 = 0.031929417992355945;
+__constant__ double  g51 = 0.19305334754638505;
+__constant__ double  g52 = 0.27094429811105371;
+__constant__ double  g53 = 0.28991291043710653;
+__constant__ double  g54 = 0.13934591681802007;
+__constant__ double  g55 = -0.010073942765637839;
+const double  g60 = 0.033333333333333333;
+const double  g61 = 0.18923747814892349;
+const double  g62 = 0.27742918851774318;
+const double  g63 = 0.27742918851774318;
+const double  g64 = 0.18923747814892349;
+const double  g65 = 0.033333333333333333;
+ 
+// the following constants are the 12th order method's coefficients
+const double  ah0 = 0.0;
+const double  ah1 = 0.084888051860716535;
+const double  ah2 = 0.26557560326464289;
+const double  ah3 = 0.50000000000000000;
+const double  ah4 = 0.73442439673535711;
+const double  ah5 = 0.91511194813928346;
+const double  ah6 = 1.0000000000000000;
+ 
+__constant__ double  bh10 = 0.033684534770907752;
+__constant__ double  bh11 = 0.057301749935629582;
+__constant__ double  bh12 = -0.0082444880936983822;
+__constant__ double  bh13 = 0.0029151263642014432;
+__constant__ double  bh14 = -0.00096482361331657787;
+__constant__ double  bh15 = 0.00019595249699271744;
+__constant__ double  bh20 = 0.015902242088596380;
+__constant__ double  bh21 = 0.16276437062291593;
+__constant__ double  bh22 = 0.096031583397703751;
+__constant__ double  bh23 = -0.011758319711158930;
+__constant__ double  bh24 = 0.0032543514515832418;
+__constant__ double  bh25 = -0.00061862458499748489;
+__constant__ double  bh30 = 0.031250000000000000;
+__constant__ double  bh31 = 0.11881843285766042;
+__constant__ double  bh32 = 0.24868761828096535;
+__constant__ double  bh33 = 0.11000000000000000;
+__constant__ double  bh34 = -0.010410996557394222;
+__constant__ double  bh35 = 0.0016549454187684515;
+__constant__ double  bh40 = 0.015902242088596380;
+__constant__ double  bh41 = 0.15809680304274781;
+__constant__ double  bh42 = 0.18880881534382426;
+__constant__ double  bh43 = 0.28087114502765051;
+__constant__ double  bh44 = 0.096031583397703751;
+__constant__ double  bh45 = -0.0052861921651656089;
+__constant__ double  bh50 = 0.033684534770907752;
+__constant__ double  bh51 = 0.11440754737426645;
+__constant__ double  bh52 = 0.24657204460460206;
+__constant__ double  bh53 = 0.20929436236889375;
+__constant__ double  bh54 = 0.25385170908498387;
+__constant__ double  bh55 = 0.057301749935629582;
+const double  bh60 = 0;
+const double  bh61 = 0.19581988897471611;
+const double  bh62 = 0.14418011102528389;
+const double  bh63 = 0.32000000000000000;
+const double  bh64 = 0.14418011102528389;
+const double  bh65 = 0.19581988897471611;
+ 
+const double  ch0 = 0.023809523809523810;
+const double  ch1 = 0.13841302368078297;
+const double  ch2 = 0.21587269060493131;
+const double  ch3 = 0.24380952380952381;
+const double  ch4 = 0.21587269060493131;
+const double  ch5 = 0.13841302368078297;
+const double  ch6 = 0.023809523809523810;
+
+#define cudaErrorCheck(call) { cudaAssert(call,__FILE__,__LINE__); }
+
+void cudaAssert(const cudaError err, const char *file, const int line)
+{ 
+    if( cudaSuccess != err) {                                                
+        fprintf(stderr, "Cuda error in file '%s' in line %i : %s.\n",        
+                file, line, cudaGetErrorString(err) );
+		getchar();
+        exit(1);
+    } 
+}
+
+//****************************************************************************
+
+//Derivative kernel: takes pointers to x[], and f[] allocated on the device
+__global__ void derKernel(double* device_x, double* device_f)
+{
+	//2 elements in device_x represent 2 elements from individual arrays X1-X4;
+	//ie if thread id is 0 then the array number is 0x2 and work on elements tx*2 and tx*2 +1
+	int tx = threadIdx.x;
+	int xArrayNumber = tx *2;
+	
+		
+			device_f[xArrayNumber] = device_x[xArrayNumber+1];
+			__syncthreads();
+			device_f[xArrayNumber+1] = -device_x[xArrayNumber];
+			__syncthreads();
+		
+		
+	
+}
+__global__ void guessKernel(double*device_X_Total, double* device_X_Not,double* device_F_Not, double h){
+
+	device_X_Total[threadIdx.x] = device_X_Not[threadIdx.x] + a1 * h * device_F_Not[threadIdx.x];
+	device_X_Total[threadIdx.x +2] = device_X_Not[threadIdx.x] + a2 * h * device_F_Not[threadIdx.x];
+	device_X_Total[threadIdx.x +4] = device_X_Not[threadIdx.x] + a3 * h * device_F_Not[threadIdx.x];
+	device_X_Total[threadIdx.x +6] = device_X_Not[threadIdx.x] + a4 * h * device_F_Not[threadIdx.x];
+}
+__global__ void order10Kernel(double*device_X_Total, double* device_X_Not, double *device_F_Not, double h, double *device_f)
+{
+	int tx = threadIdx.x;
+	device_X_Total[tx]=device_X_Not[tx] + h*((b10 * device_F_Not[tx]) + (b11 * device_f[tx]) + (b12 * device_f[tx+2]) + (b13 * device_f[tx +4]) + (b14 * device_f[tx +6]));
+	__syncthreads();
+	device_X_Total[tx+2]=device_X_Not[tx] + h*((b20 * device_F_Not[tx]) + (b21 * device_f[tx]) + (b22 * device_f[tx+2]) + (b23 * device_f[tx +4]) + (b24 * device_f[tx +6]));
+	__syncthreads();
+	device_X_Total[tx+4]=device_X_Not[tx] + h*((b30 * device_F_Not[tx]) +( b31 * device_f[tx]) + (b32 * device_f[tx+2]) + (b33 * device_f[tx +4]) + (b34 * device_f[tx +6]));
+	__syncthreads();
+	device_X_Total[tx+6]=device_X_Not[tx] + h*((b40 * device_F_Not[tx]) + (b41 * device_f[tx]) +( b42 * device_f[tx+2]) + (b43 * device_f[tx +4]) +( b44 * device_f[tx +6]));
+	__syncthreads();
+	
+}
+__global__ void Order10FkKernel(double*device_X_Total, double* device_X_Not, double* device_F_Not, double h, double*device_f)
+{
+
+	int tx = threadIdx.x;
+	device_X_Total[tx] = device_X_Not[tx] + h*((g10*device_F_Not[tx])+ (g11 * device_f[tx]) + (g12 * device_f[tx+2])+ (g13 * device_f[tx + 4]) + (g14 * device_f[tx+ 6])+ (g15 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+2] = device_X_Not[tx] + h*((g20*device_F_Not[tx])+ (g21 * device_f[tx]) + (g22 * device_f[tx+2])+ (g23 * device_f[tx + 4]) + (g24 * device_f[tx+ 6])+ (g25 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+4] = device_X_Not[tx] + h*((g30*device_F_Not[tx])+ (g31 * device_f[tx]) + (g32 * device_f[tx+2])+ (g33 * device_f[tx + 4]) + (g34 * device_f[tx+ 6])+ (g35 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+6] = device_X_Not[tx] + h*((g40*device_F_Not[tx])+ (g41 * device_f[tx]) + (g42 * device_f[tx+2])+ (g43 * device_f[tx + 4]) + (g44 * device_f[tx+ 6])+ (g45 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+8] = device_X_Not[tx] + h*((g50*device_F_Not[tx])+ (g51 * device_f[tx]) + (g52 * device_f[tx+2])+ (g53 * device_f[tx + 4]) + (g54 * device_f[tx+ 6])+ (g55 *device_f[tx+8]));
+	__syncthreads();
+}
+__global__ void Order12Kernel(double*device_X_Total, double* device_X_Not, double* device_F_Not, double h, double*device_f){
+	
+	int tx =  threadIdx.x;
+	device_X_Total[tx] = device_X_Not[tx] + h*((bh10*device_F_Not[tx])+ (bh11 * device_f[tx]) + (bh12 * device_f[tx+2])+ (bh13 * device_f[tx + 4]) + (bh14 * device_f[tx+ 6])+ (bh15 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+2] = device_X_Not[tx] + h*((bh20*device_F_Not[tx])+ (bh21 * device_f[tx]) + (bh22 * device_f[tx+2])+ (bh23 * device_f[tx + 4]) + (bh24 * device_f[tx+ 6])+ (bh25 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+4] = device_X_Not[tx] + h*((bh30*device_F_Not[tx])+ (bh31 * device_f[tx]) + (bh32 * device_f[tx+2])+ (bh33 * device_f[tx + 4]) + (bh34 * device_f[tx+ 6])+ (bh35 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+6] = device_X_Not[tx] + h*((bh40*device_F_Not[tx])+ (bh41 * device_f[tx]) + (bh42 * device_f[tx+2])+ (bh43 * device_f[tx + 4]) + (bh44 * device_f[tx+ 6])+ (bh45 *device_f[tx+8]));
+	__syncthreads();
+	device_X_Total[tx+8] = device_X_Not[tx] + h*((bh50*device_F_Not[tx])+ (bh51 * device_f[tx]) + (bh52 * device_f[tx+2])+ (bh53 * device_f[tx + 4]) + (bh54 * device_f[tx+ 6])+ (bh55 *device_f[tx+8]));
+	__syncthreads();
+}
+//****************************************************************************
+// the following function describes the ordinary differential equations
+//** The function is still live for the non parallel function calls to der
+//** still active in the program. 
+void der(double t, double x[], double f[]) {
+       if (sho) {
+              f[0] = x[1];
+              f[1] = -x[0];
+       }
+       else {
+              f[0] = x[0] * (2.0 - x[1]);
+              f[1] = x[1] * (x[0] - 1.0);
+       }
+}
+ 
+void rk1210() {
+       // Implicit Runge-Kutta of orders 12 and 10
+       double  x0[MAXEQNS], x1[MAXEQNS], x2[MAXEQNS], x3[MAXEQNS], x4[MAXEQNS];
+       double  x5[MAXEQNS], x6[MAXEQNS], xn10[MAXEQNS], xn12[MAXEQNS];
+       double  t0, tf, h, hnew, est, esti, f0[MAXEQNS], f1[MAXEQNS], f2[MAXEQNS];
+       double  f3[MAXEQNS], f4[MAXEQNS], f5[MAXEQNS], f6[MAXEQNS];
+       int     iter;
+       bool    finished = false;  // becomes true when we have reached tf
+ 
+       if (sho) {
+              h = PI / 4.0;       // initial guess for stepsize to use
+              x0[0] = 0.0;      // initial value of first  component
+              x0[1] = 1.0;      // initial value of second component
+              t0 = 0.0;         // initial t value, t0
+              tf = 2 * PI;        // final t value, tf
+       }
+       else {
+              h = 1.0 / 2.0;      // initial guess for stepsize to use
+              x0[0] = 2.0;      // initial value of first  component
+              x0[1] = 2.0;      // initial value of second component
+              t0 = 0.0;         // initial t value, t0
+              tf = 4.0;         // final t value, tf
+       }
+       printf("Initial conditions are  t0 = %8.5lf, x0[0] = %18.15lf, x0[1] = %18.15lf\n", t0, x0[0], x0[1]);
+	   const int arraySize = 10;  //there will be 8 elements being written from x1-x4 (Remaining 2 for when X5 is included);
+			  int numOfXArrays =4;
+			  double x_total[arraySize]; 
+			  double f_total[arraySize];
+       while (!finished) {                  // keep going until we reach tf successfully
+              der(t0, x0, f0);                    // first, we will get 10th order results
+              ////////////////////   THIS CAN BE DONE IN PARALLEL   ///////////////////////
+              //for (int i = 0; i<neqns; i++) {
+              //       x1[i] = x0[i] + a1*h*f0[i];  // just guess that solution is a straight line initially
+              //       x2[i] = x0[i] + a2*h*f0[i];  // at the four internal points within the step
+              //       x3[i] = x0[i] + a3*h*f0[i];
+              //       x4[i] = x0[i] + a4*h*f0[i];
+              //}
+			  //*************************************************************************************
+			  double* device_x_total; double* device_x_not; double* device_f_not; //creating variables for the device
+			  //allocating memory for device variables
+			  cudaMalloc((void**) &device_x_total, arraySize * sizeof(double));
+			  cudaMalloc((void**) &device_x_not, arraySize * sizeof(double));
+			  cudaMalloc((void**) &device_f_not, arraySize * sizeof(double));
+			  //copying contents of x0 and f0 to the device variables
+			  cudaMemcpy(device_x_not, x0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+			  cudaMemcpy(device_f_not, f0, arraySize *sizeof(double), cudaMemcpyHostToDevice);
+			  guessKernel<<<1, neqns>>>(device_x_total, device_x_not, device_f_not, h);
+
+			  cudaMemcpy(x_total, device_x_total, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+
+			  //************************************************************************************
+              ////////////////////   AND THIS CAN BE DONE IN PARALLEL   ///////////////////////
+              //der(t0 + a1*h, x1, f1);          // now, evaluate the derivatives at these four points
+              //der(t0 + a2*h, x2, f2);
+              //der(t0 + a3*h, x3, f3);
+              //der(t0 + a4*h, x4, f4);
+			  //****************************************************************************************
+			  
+			  double* device_f;  //creating variables for device;
+			  //allocating memory for x[], and f[]
+			  cudaMalloc((void**) &device_x_total, arraySize* sizeof(double));
+			  cudaMalloc((void**) &device_f, arraySize * sizeof(double));
+
+			  //copying over t and x[]
+			  cudaMemcpy(device_x_total, x_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+			  //*******Creating timers to test 4 arrays *********
+			  /*cudaEvent_t start, stop;
+			  cudaEventCreate(&start);
+			  cudaEventCreate(&stop);
+			  cudaEventRecord(start);*/
+			  //kernel call
+			  derKernel<<<1,numOfXArrays>>>(device_x_total, device_f);
+			  
+			 /* cudaEventRecord(stop);*/
+			  //copying data from device to host
+		      cudaMemcpy(f_total, device_f, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+			  /*cudaEventSynchronize(stop);
+			  float milliseconds =0;
+			  cudaEventElapsedTime(&milliseconds, start, stop);
+			  printf("Kernel took: %f milliseconds\n", milliseconds);
+			  getchar();*/
+			  
+			  
+			  //****************************************************************************************
+			  cudaMalloc((void**) &device_x_total, arraySize* sizeof(double));
+			  cudaMalloc((void**) &device_x_not, arraySize*sizeof(double));
+			  cudaMalloc((void**) &device_f_not, arraySize*sizeof(double));
+			  cudaMalloc((void**) &device_f, arraySize*sizeof(double));
+              for (iter = 0; iter<itermax10; iter++) {  // now, we perform itermax10 iterations for the 10th order method
+                     printf("iter = %d\n", iter);
+                     //////////////////   AND THIS CAN BE DONE IN PARALLEL   ///////////////////////
+						/*for (int i = 0; i<neqns; i++) x1[i] = x0[i] + h*(b10*f0[i] + b11*f1[i] + b12*f2[i] + b13*f3[i] + b14*f4[i]);
+						for (int i = 0; i<neqns; i++) x2[i] = x0[i] + h*(b20*f0[i] + b21*f1[i] + b22*f2[i] + b23*f3[i] + b24*f4[i]);
+						for (int i = 0; i<neqns; i++) x3[i] = x0[i] + h*(b30*f0[i] + b31*f1[i] + b32*f2[i] + b33*f3[i] + b34*f4[i]);
+						for (int i = 0; i<neqns; i++) x4[i] = x0[i] + h*(b40*f0[i] + b41*f1[i] + b42*f2[i] + b43*f3[i] + b44*f4[i]);*/
+					 
+						
+					    //*************Copying over f_total f0 and x0*******************************
+						cudaMemcpy(device_f, f_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+						cudaMemcpy(device_f_not, f0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+						cudaMemcpy(device_x_not, x0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+						order10Kernel<<<1,neqns>>>(device_x_total,device_x_not,device_f_not, h,device_f);
+					    cudaMemcpy(x_total, device_x_total, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+						
+						
+
+					 //**********************************************************************************************************************
+                     ////////////////////   AND THIS CAN BE DONE IN PARALLEL   ///////////////////////
+                     //der(t0 + a1*h, x1, f1);          // now, evaluate the derivatives at these four points
+                     //der(t0 + a2*h, x2, f2);
+                     //der(t0 + a3*h, x3, f3);
+                     //der(t0 + a4*h, x4, f4);
+					 //************************************************************************************
+			  
+					 
+					  cudaMalloc((void**) &device_x_total, arraySize* sizeof(double));
+					  cudaMalloc((void**) &device_f, arraySize * sizeof(double));
+
+					  //copying over t and x[]
+					  cudaMemcpy(device_x_total, x_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+						
+					  //kernel call
+					   derKernel<<<1,numOfXArrays>>>(device_x_total, device_f);
+					  //writeback
+					  cudaMemcpy(f_total, device_f, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+					 
+					 //*****************************************************************************************
+                     ////////////////////   END OF PARALLEL SECTION OF CODE  ///////////////////////
+              }
+			  cudaFree(device_x_total);
+			  cudaFree(device_x_not);
+			  cudaFree(device_f_not);
+			  cudaFree(device_f);
+
+			   
+			   memcpy(x1,x_total, 2*sizeof(double));
+			   memcpy(x2,x_total +2, 2*sizeof(double));
+			   memcpy(x3,x_total +4, 2 *sizeof(double));
+		       memcpy(x4, x_total +6, 2*sizeof(double));
+			   memcpy(f1,f_total, 2*sizeof(double));
+			   memcpy(f2,f_total +2, 2*sizeof(double));
+			   memcpy(f3,f_total +4, 2 *sizeof(double));
+			   memcpy(f4, f_total +6, 2*sizeof(double));
+						
+              for (int i = 0; i<neqns; i++) x5[i] = x0[i] + h*(b50*f0[i] + b51*f1[i] + b52*f2[i] + b53*f3[i] + b54*f4[i]);  // now get x5
+              der(t0 + a5*h, x5, f5);  // and get the derivative there, f5
+              for (int i = 0; i<neqns; i++) {
+                     xn10[i] = x0[i] + h*(c0*f0[i] + c1*f1[i] + c2*f2[i] + c3*f3[i] + c4*f4[i] + c5*f5[i]);  // now compute final 10th order answer
+              }
+              if (sho) {
+                     printf("10th order iterations = %d, t = %8.5lf, xn10[0] = %18.15lf, xn10[1] = %18.15lf, error[0] = %e, error[1] = %e\n",
+                           itermax10, t0 + h, xn10[0], xn10[1], xn10[0] - sin(t0 + h), xn10[1] - cos(t0 + h));
+              }
+              else {
+                     printf("10th order iterations = %d, t = %8.5lf, xn10[0] = %18.15lf, xn10[1] = %18.15lf\n",
+                           itermax10, t0 + h, xn10[0], xn10[1]);
+              }
+              ////////////////////   THIS CAN BE DONE IN PARALLEL   ///////////////////////
+              //for (int i = 0; i<neqns; i++) {
+              //       x1[i] = x0[i] + h*(g10*f0[i] + g11*f1[i] + g12*f2[i] + g13*f3[i] + g14*f4[i] + g15*f5[i]); // these fk's are from 10th order method,
+              //       x2[i] = x0[i] + h*(g20*f0[i] + g21*f1[i] + g22*f2[i] + g23*f3[i] + g24*f4[i] + g25*f5[i]); // and note that they are being
+              //       x3[i] = x0[i] + h*(g30*f0[i] + g31*f1[i] + g32*f2[i] + g33*f3[i] + g34*f4[i] + g35*f5[i]); // used to build the five internal values
+              //       x4[i] = x0[i] + h*(g40*f0[i] + g41*f1[i] + g42*f2[i] + g43*f3[i] + g44*f4[i] + g45*f5[i]); // used to construct the 12th order xk's,
+              //       x5[i] = x0[i] + h*(g50*f0[i] + g51*f1[i] + g52*f2[i] + g53*f3[i] + g54*f4[i] + g55*f5[i]); // so these xk's are for the 12th order method
+              //}
+			  //***************************************************************************************************************************************************
+			  
+			  //copying f arrays to a single array f_total
+			   memcpy(f_total,f1, 2*sizeof(double));
+			   memcpy(f_total+2,f2, 2*sizeof(double));
+			   memcpy(f_total+4,f3, 2 *sizeof(double));
+			   memcpy(f_total+6, f4, 2*sizeof(double));
+			   memcpy(f_total+8, f5, 2*sizeof(double));
+			   //allocating memory
+			   cudaMalloc((void**) &device_x_total, arraySize*sizeof(double));
+			   cudaMalloc((void**) &device_f, arraySize*sizeof(double));
+			   cudaMalloc((void**) &device_x_not, arraySize*sizeof(double));
+			   cudaMalloc((void**) &device_f_not, arraySize*sizeof(double));
+
+			   //copying over f0, x0, and f_total
+			   cudaMemcpy(device_f,f_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+			   cudaMemcpy(device_x_not, x0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+			   cudaMemcpy(device_f_not, f0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+
+			   //calling order10 kernel
+			   Order10FkKernel<<<1, neqns>>>(device_x_total, device_x_not, device_f_not, h, device_f);
+
+			   //WriteBack of x_total 
+			   cudaMemcpy(x_total, device_x_total, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+			   
+			  //***************************************************************************************************************************************************
+              ////////////////////    AND THIS CAN BE DONE IN PARALLEL   ///////////////////////
+              //der(t0 + a1*h, x1, f1);
+              //der(t0 + a2*h, x2, f2);    //  now we get the fk's to be used in the 12th order method
+              //der(t0 + a3*h, x3, f3);
+              //der(t0 + a4*h, x4, f4);    // i.e., obtain derivatives at the five internal points needed for 12th order method
+              //der(t0 + a5*h, x5, f5);
+			  //********************************************************************************************************************
+			  numOfXArrays=5;  //because we are passing in X1-X5
+			  
+			  cudaMemcpy(device_x_total, x_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+			  //kernel call
+			  derKernel<<<1,numOfXArrays>>>(device_x_total, device_f);
+			  //copying data from device to host
+			  cudaMemcpy(f_total, device_f, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+			  
+			  //****************************************************************************************************************************
+
+              ////////////////////   END OF PARALLEL SECTION OF CODE  ///////////////////////
+              for (iter = 0; iter<itermax12; iter++) {  // now we can iterate to improve the values at the five internal points
+                     ////////////////////   THIS CAN BE DONE IN PARALLEL   ///////////////////////
+                     //for (int i = 0; i<neqns; i++) {  // each time, we recompute the internal xk values used in the 12th order method
+                     //      x1[i] = x0[i] + h*(bh10*f0[i] + bh11*f1[i] + bh12*f2[i] + bh13*f3[i] + bh14*f4[i] + bh15*f5[i]);
+                     //      x2[i] = x0[i] + h*(bh20*f0[i] + bh21*f1[i] + bh22*f2[i] + bh23*f3[i] + bh24*f4[i] + bh25*f5[i]);
+                     //      x3[i] = x0[i] + h*(bh30*f0[i] + bh31*f1[i] + bh32*f2[i] + bh33*f3[i] + bh34*f4[i] + bh35*f5[i]);
+                     //      x4[i] = x0[i] + h*(bh40*f0[i] + bh41*f1[i] + bh42*f2[i] + bh43*f3[i] + bh44*f4[i] + bh45*f5[i]);
+                     //      x5[i] = x0[i] + h*(bh50*f0[i] + bh51*f1[i] + bh52*f2[i] + bh53*f3[i] + bh54*f4[i] + bh55*f5[i]);
+                     //}
+				  cudaMemcpy(device_f, f_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+				  cudaMemcpy(device_x_not, x0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+				  cudaMemcpy(device_f_not, f0, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+				  Order12Kernel<<<1,neqns>>>(device_x_total, device_x_not, device_f_not, h, device_f);
+			      cudaMemcpy(x_total, device_x_total, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+
+                     ////////////////////  AND THIS CAN BE DONE IN PARALLEL   ///////////////////////
+                     //der(t0 + a1*h, x1, f1);  // once again, obtain derivatives at the five internal points of the 12th order method
+                     //der(t0 + a2*h, x2, f2);
+                     //der(t0 + a3*h, x3, f3);
+                     //der(t0 + a4*h, x4, f4);
+                     //der(t0 + a5*h, x5, f5);
+                     ////////////////////   END OF PARALLEL SECTION OF CODE  ///////////////////////
+					 //*******************************************************************************************************************
+						
+						cudaMemcpy(device_x_total, x_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+						//kernel call
+						derKernel<<<1,numOfXArrays>>>(device_x_total, device_f);
+						//copying data from device to host
+						cudaMemcpy(f_total, device_f, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+						
+			  }
+
+			   cudaFree(device_x_total);
+			  cudaFree(device_f);
+			  cudaFree(device_x_not);
+			  cudaFree(device_f_not);
+			  memcpy(f1,f_total, 2*sizeof(double));
+			  memcpy(f2,f_total +2, 2*sizeof(double));
+			  memcpy(f3,f_total +4, 2 *sizeof(double));
+			  memcpy(f4, f_total +6, 2*sizeof(double));
+			  memcpy(f5, f_total +8, 2*sizeof(double));
+			  memcpy(x1,x_total, 2*sizeof(double));
+			  memcpy(x2,x_total +2, 2*sizeof(double));
+			  memcpy(x3,x_total +4, 2 *sizeof(double));
+			  memcpy(x4, x_total +6, 2*sizeof(double));
+			  memcpy(x5, x_total +8, 2*sizeof(double));
+              for (int i = 0; i<neqns; i++) {  // iteration complete, so now compute final base value for 12th order method
+                     x6[i] = x0[i] + h*(bh60*f0[i] + bh61*f1[i] + bh62*f2[i] + bh63*f3[i] + bh64*f4[i] + bh65*f5[i]);
+              }
+              der(t0 + ah6*h, x6, f6);  // and get the derivative there
+              for (int i = 0; i<neqns; i++) {  // now, compute the final 12th order approximation to the solution at the end of the step
+                     xn12[i] = x0[i] + h*(ch0*f0[i] + ch1*f1[i] + ch2*f2[i] + ch3*f3[i] + ch4*f4[i] + ch5*f5[i] + ch6*f6[i]);  // now compute final 12th order answer
+              }
+              printf("      The estimates of the errors in the 10-th order method by differencing with 12-th order method results are %e      and    %e\n", xn10[0] - xn12[0], xn10[1] - xn12[1]);
+              if (sho) {
+                     printf("12th order iterations = %d, t = %8.5lf, xn12[0] = %18.15lf, xn12[1] = %18.15lf, error[0] = %e, error[1] = %e\n",
+                           iter, t0 + h, xn12[0], xn12[1], xn12[0] - sin(t0 + h), xn12[1] - cos(t0 + h));
+              }
+              else {
+                     printf("12th order iterations = %d, t = %8.5lf, xn12[0] = %18.15lf, xn12[1] = %18.15lf\n",
+                           iter, t0 + h, xn12[0], xn12[1]);
+              }
+              est = 1.0e-30;
+              for (int i = 0; i<neqns; i++) {  // now, just update the solution to prepare for the next step
+                     esti = xn10[i] - xn12[i];
+                     est = est + esti*esti;
+              }
+              est = sqrt(est);  // sqrt of the sum of the squares of the errors in each component of the solution at t0 + h
+              hnew = h * pow(tol10 / est, 0.1);
+              if (est < tol) {  // if error estimate is less than the error tolerance, then the step succeeded
+                     printf("The step succeeded since est = %e was less than tol = %e\n\n", est, tol);
+                     for (int i = 0; i<neqns; i++) {  // now, just update the solution to prepare for the next step
+                           x0[i] = xn12[i];
+                     }
+                     t0 = t0 + h;  // and update the independent variable
+                     if (t0 / tf >= 0.99999999999999) finished = true;  // and if we have reached the final value, tf, set finished to true
+              }
+              else {
+                     printf("The step failed since est = %e was not less than tol = %e\n\n", est, tol);
+              }
+              h = hnew;  // in any event, if not finished, we set the stepsize, h, to the new value, hnew
+              if ((t0 + h) > tf) h = tf - t0;  // if new step takes us past final value, tf, reduce it to tf-t0
+       }
+}
+ 
+int main(int argc, char* argv[])
+{
+	  cudaEvent_t start, stop;
+	  cudaEventCreate(&start);
+	  cudaEventCreate(&stop);
+	  cudaEventRecord(start);
+       printf("Testing Implicit RK1210 ");
+       if (sho) {
+              printf(" for simple harmonic oscillator example problem \n\n");
+       }
+       else {
+              printf(" for predator - prey example problem \n\n");
+       }
+       rk1210();
+	   cudaEventRecord(stop);
+	   cudaEventSynchronize(stop);
+	   float milliseconds =0;
+	   cudaEventElapsedTime(&milliseconds, start, stop);
+	   printf("Code took: %f milliseconds\n", milliseconds);
+			  
+	   getchar();
+       return 0;
+}

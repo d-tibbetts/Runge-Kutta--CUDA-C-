@@ -1,0 +1,118 @@
+Original Kernel and code from TFRK1012v2
+
+
+//Derivative kernel: takes pointers to x[], and f[] allocated on the device
+__global__ void derKernel(double* device_x, double* device_f)
+{
+	int tx = threadIdx.x;
+	if(tx % 2 == 0)
+	{
+		if(sho)//not sure if defined correctly that the kernel recognizes it
+		{
+			device_f[tx] = device_x[tx+1];
+			device_f[tx+1] = -device_x[tx];
+		}
+		else //added predator prey functionality but not tested.
+		{
+			device_f[tx] = device_x[tx] *(2.0 - device_x[tx +1]);
+			device_f[tx +1] = device_x[tx+1] * (device_x[tx] -1.0);
+		}
+	}
+}
+
+
+const int arraySize = 8;  //there will be 8 elements being written from x1-x4;
+			  double x_total[arraySize]; 
+			  double f_total[arraySize];
+			  memcpy(x_total, x1, 2*sizeof(double)); 
+			  memcpy(x_total + 2, x2, 2*sizeof(double)); 
+			  memcpy(x_total + 4, x3, 2*sizeof(double)); 
+			  memcpy(x_total+ 6, x4, 2*sizeof(double)); 
+			  
+			  double* device_x_total, double* device_f;  //creating variables for device;
+			  //allocating memory for x[], and f[]
+			  cudaMalloc((void**) &device_x_total, arraySize* sizeof(double));
+			  cudaMalloc((void**) &device_f, arraySize * sizeof(double));
+
+			  //copying over t and x[]
+			  cudaMemcpy(device_x_total, x_total, arraySize*sizeof(double), cudaMemcpyHostToDevice);
+			  //kernel call
+			  derKernel<<<1,arraySize>>>(device_x_total, device_f);
+			  //copying data from device to host
+			  cudaMemcpy(f_total, device_f, arraySize*sizeof(double), cudaMemcpyDeviceToHost);
+			  //freeing up memory.
+			  cudaFree(device_x_total);
+			  cudaFree(device_f);
+			  //write back to respective arrays f1, f2, f3, f4
+			  memcpy(f1,f_total, 2*sizeof(double));
+			  memcpy(f2,f_total +2, 2*sizeof(double));
+			  memcpy(f3,f_total +4, 2 *sizeof(double));
+			  memcpy(f4, f_total +6, 2*sizeof(double));
+		
+		*********************************************************************************************************************
+		//second version of the kernel code going back to the first. 10/20/16	 
+
+		double *device_x1, *device_x2, *device_x3, *device_x4;
+				double *device_f1, *device_f2, *device_f3, *device_f4;
+				//allocating memory for x1- x4 arrays
+				cudaMalloc((void**) &device_x1, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_x2, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_x2, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_x3, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_x4, MAXEQNS * sizeof(double));
+				//allocating memory for f1-f4 arrays 
+				cudaMalloc((void**) &device_f1, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_f2, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_f3, MAXEQNS * sizeof(double));
+				cudaMalloc((void**) &device_f4, MAXEQNS * sizeof(double));
+				//copying x1-x4 to device
+				cudaMemcpy(device_x1, x1, MAXEQNS*sizeof(double), cudaMemcpyHostToDevice);
+				cudaMemcpy(device_x2, x2, MAXEQNS*sizeof(double), cudaMemcpyHostToDevice);
+				cudaMemcpy(device_x3, x3, MAXEQNS*sizeof(double), cudaMemcpyHostToDevice);
+				cudaMemcpy(device_x4, x4, MAXEQNS*sizeof(double), cudaMemcpyHostToDevice);
+			     
+				//kernel call
+				derKernel<<<1,4>>>(device_x1,device_x2, device_x3, device_x4, device_f1, 
+								   device_f2, device_f3, device_f4);
+			    //writing f1, f2, f3, f4 back to  host
+				cudaMemcpy(f1,device_f1, MAXEQNS*sizeof(double), cudaMemcpyDeviceToHost);
+				cudaMemcpy(f2, device_f2, MAXEQNS*sizeof(double), cudaMemcpyDeviceToHost);
+				cudaMemcpy(f3, device_f3, MAXEQNS*sizeof(double), cudaMemcpyDeviceToHost);
+				cudaMemcpy(f4, device_f4, MAXEQNS*sizeof(double), cudaMemcpyDeviceToHost);
+
+				//free memory
+				cudaFree(device_x1);
+				cudaFree(device_x2);
+				cudaFree(device_x3);
+				cudaFree(device_x4);
+				cudaFree(device_f1);
+				cudaFree(device_f2);
+				cudaFree(device_f3);
+				cudaFree(device_f4);
+
+						__global__ void derKernel(double* device_x1, double* device_x2,double* device_x3, double* device_x4, 
+						  double* device_f1, double*device_f2, double* device_f3, double*device_f4)
+						{
+						int tx = threadIdx.x;
+	
+						switch(tx){
+							case 0:
+								device_f1[0]=device_x1[1];
+								device_f1[1]=-device_x1[0];
+								break;
+							case 1: 
+								device_f2[0]=device_x2[1];
+								device_f2[1]=-device_x2[0];
+								break;
+							case 2: 
+								device_f3[0]=device_x3[1];
+								device_f3[1]=-device_x3[0];
+								break;
+							case 3: 
+								device_f4[0]=device_x4[1];
+								device_f4[1]=-device_x4[0];
+								break;
+							default:
+								break;
+						}
+					}
